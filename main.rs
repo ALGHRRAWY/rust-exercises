@@ -1,0 +1,71 @@
+use std::collections::HashMap;
+use std::hash::Hash;
+use std::time::Instant;
+
+// It returns FnMut and not Fn because every call may insert a new result
+// into the HashMap captured by the closure. Changing captured data is
+// mutation, and only FnMut closures are allowed to do that.
+fn memoize<K: Eq + Hash + Copy, V: Clone>(
+    f: impl Fn(K) -> V,
+) -> impl FnMut(K) -> V {
+    let mut cache: HashMap<K, V> = HashMap::new();
+    move |n: K| cache.entry(n).or_insert_with(|| f(n)).clone()
+}
+
+fn slow_square(n: u64) -> u64 {
+    std::thread::sleep(std::time::Duration::from_secs(1));
+    n * n
+}
+
+fn fib(n: u64) -> u64 {
+    if n < 2 { n } else { fib(n - 1) + fib(n - 2) }
+}
+
+// memoize(fib) would not make fib(50) fast because memoize only wraps the
+// outside call. Inside, fib still calls itself, not the memoized wrapper,
+// so the recursive calls never use the cache and are computed again and again.
+fn fib_memo(n: u64, cache: &mut HashMap<u64, u64>) -> u64 {
+    if n < 2 {
+        return n;
+    }
+    if let Some(&value) = cache.get(&n) {
+        return value;
+    }
+    let result = fib_memo(n - 1, cache) + fib_memo(n - 2, cache);
+    cache.insert(n, result);
+    result
+}
+
+fn main() {
+    let mut square = memoize(|n: u64| {
+        println!("computing {n}");
+        n * n
+    });
+    square(4);
+    square(4);
+    square(5);
+
+    let input = [2u64, 3, 2, 2, 3];
+
+    let start = Instant::now();
+    let result1: Vec<u64> = input.iter().map(|&n| slow_square(n)).collect();
+    println!("slow_square: {:?} in {:?}", result1, start.elapsed());
+
+    let mut fast_square = memoize(slow_square);
+    let start = Instant::now();
+    let result2: Vec<u64> = input.iter().map(|&n| fast_square(n)).collect();
+    println!("memoize(slow_square): {:?} in {:?}", result2, start.elapsed());
+
+    // slow_square takes about 5 seconds: it sleeps 1 second on each of the
+    // 5 calls, even when the argument repeats.
+    // memoize(slow_square) takes about 2 seconds: only the first call with 2
+    // and the first call with 3 are really computed, the other 3 come from
+    // the cache instantly.
+
+    assert_eq!(fib_memo(0, &mut HashMap::new()), 0);
+    assert_eq!(fib_memo(1, &mut HashMap::new()), 1);
+    assert_eq!(fib_memo(10, &mut HashMap::new()), 55);
+    assert_eq!(fib_memo(50, &mut HashMap::new()), 12586269025);
+    assert_eq!(fib_memo(90, &mut HashMap::new()), 2880067194370816120);
+    println!("All tests passed!");
+}
